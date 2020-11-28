@@ -1,10 +1,11 @@
 import os
 import datetime
 from flask import render_template, url_for,flash,redirect,request,json,jsonify,make_response
-from pixies_web import app,db,bcrypt,cloud
+from pixies_web import app,db,bcrypt,cloud,mail
 from pixies_web.forms import RegistrationForm,LoginForm,UpdateCuentaForm,RequestResetForm,ResetPasswordForm
 from pixies_web.models import User,analizis,calcularThreeM,datos_agrupados_porPais,firstTendatos,dataforMap,dataMap,PDF,groupByPais
 from flask_login import login_user,current_user,logout_user,login_required
+from flask_mail import Message
 
 @app.route('/',methods=['GET','POST'])
 def index():
@@ -26,7 +27,7 @@ def register():
         return redirect(url_for('analisis'))
     form = RegistrationForm()
     if form.validate_on_submit():
-        checkar = User.query.filter_by(User.username).count()
+        checkar = User.query.count()
         if checkar < 10:
                 has_contrasena = bcrypt.generate_password_hash(form.password.data).decode('utf-8')
                 usuario = User(username=form.username.data, email=form.email.data,password=has_contrasena)
@@ -78,8 +79,17 @@ def salir_sesion():
     logout_user()
     return redirect(url_for('index'))
 
-def send_reset_email(usr):
-    pass
+def send_reset_email(user):
+    token = user.get_reset_token()
+    msg = Message('Password Reset Request',
+                    sender='victor.sistemasnav@gmail.com',
+                    recipients=[user.email])
+    msg.body=f'''Porfavor borra la password, para ello visita la pagina:
+{url_for('reset_token',token=token , _external=True)}
+
+Si no lo solicitastes porfavor ignore esto carnal!!
+    '''
+    mail.send(msg)               
 
 @app.route('/reset_password',methods=['GET','POST'])
 def reset_password():
@@ -89,7 +99,8 @@ def reset_password():
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data).first()
         send_reset_email(user)
-        flash('An Email Has been sent with instructions to reset your password')
+        flash('An Email Has been sent with instructions to reset your password, check spam folder', category='alert')
+        return redirect(url_for('index'))
     return render_template('reset_request.html',form=form)
 
 @app.route('/reset_password/<token>',methods=['GET','POST'])
@@ -98,9 +109,15 @@ def reset_token(token):
         return redirect(url_for('index'))
     user = User.verify_reset_token(token)
     if user is None:
-        flash('that is invalid or expired','warning')
+        flash('that is invalid or expired token','warning')
         return redirect(url_for('reset_password'))
     form = ResetPasswordForm()
+    if form.validate_on_submit():
+        has_contrasena = bcrypt.generate_password_hash(form.password.data).decode('utf-8')
+        user.password = has_contrasena
+        db.session.commit()
+        flash('Tu password fue actualizada, ya es posible iniciar sesion', category='success')
+        return redirect(url_for('index'))
     return render_template('reset_token.html',form=form) 
 
 #ruta para la pagina donde muestra los datos importantes
